@@ -1,0 +1,26 @@
+[
+  {
+    "id": "multi_region_ai",
+    "query": "Compare the economic impacts of AI adoption in healthcare vs. manufacturing across the US, EU, and China. What are the key policy differences, and which region is best positioned for growth by 2030?",
+    "expected_sub_queries_min": 3,
+    "notes": "Tests multi-dimensional decomposition (sectors × regions) and cross-source synthesis"
+  },
+  {
+    "id": "fusion_energy",
+    "query": "What are the main benefits and risks of nuclear fusion energy? How close are we to commercial viability, and what are the leading approaches (tokamak vs stellarator vs inertial confinement)?",
+    "expected_sub_queries_min": 3,
+    "notes": "Tests technical depth and comparison across multiple approaches"
+  },
+  {
+    "id": "climate_adaptation",
+    "query": "How are coastal cities adapting to rising sea levels? Compare the strategies of Miami, Rotterdam, and Jakarta, and evaluate which is most sustainable long-term.",
+    "expected_sub_queries_min": 3,
+    "notes": "Tests geographic comparison and evaluative synthesis"
+  },
+  {
+    "id": "simple_factual",
+    "query": "What is the current population of Tokyo?",
+    "expected_sub_queries_min": 1,
+    "notes": "Baseline: simple query that should NOT be over-decomposed"
+  }
+]

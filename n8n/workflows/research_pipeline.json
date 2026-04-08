@@ -1,0 +1,131 @@
+{
+  "name": "Deep Research Agent Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "research",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/decompose",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: $json.body.query }) }}",
+        "options": {}
+      },
+      "id": "decompose-query",
+      "name": "Decompose Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const subQueries = $input.first().json.sub_queries;\nconst originalQuery = $('Webhook Trigger').first().json.body.query;\nreturn subQueries.map(sq => ({ json: { sub_query: sq, original_query: originalQuery } }));"
+      },
+      "id": "split-subqueries",
+      "name": "Split Sub-Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ sub_query: $json.sub_query }) }}",
+        "options": {}
+      },
+      "id": "research-subquery",
+      "name": "Research Sub-Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const findings = $input.all().map(item => ({\n  subquery: item.json.sub_query,\n  summary: item.json.summary\n}));\nconst originalQuery = $('Split Sub-Queries').first().json.original_query;\nreturn [{ json: { query: originalQuery, findings: findings } }];"
+      },
+      "id": "collect-findings",
+      "name": "Collect Findings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/synthesise",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "synthesise-answer",
+      "name": "Synthesise Answer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const answer = $input.first().json.answer;\nconst budget = $input.first().json.budget;\nreturn [{ json: { answer, budget } }];"
+      },
+      "id": "format-response",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Decompose Query", "type": "main", "index": 0 }]
+      ]
+    },
+    "Decompose Query": {
+      "main": [
+        [{ "node": "Split Sub-Queries", "type": "main", "index": 0 }]
+      ]
+    },
+    "Split Sub-Queries": {
+      "main": [
+        [{ "node": "Research Sub-Query", "type": "main", "index": 0 }]
+      ]
+    },
+    "Research Sub-Query": {
+      "main": [
+        [{ "node": "Collect Findings", "type": "main", "index": 0 }]
+      ]
+    },
+    "Collect Findings": {
+      "main": [
+        [{ "node": "Synthesise Answer", "type": "main", "index": 0 }]
+      ]
+    },
+    "Synthesise Answer": {
+      "main": [
+        [{ "node": "Format Response", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "deep-research-agent" }
+  ]
+}

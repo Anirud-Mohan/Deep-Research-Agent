@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Deep Research Agent</title>
+<style>
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface2: #22252f;
+  --border: #2a2d3a;
+  --text: #e4e4e7;
+  --muted: #8b8d98;
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --green: #22c55e;
+  --amber: #f59e0b;
+  --red: #ef4444;
+  --blue: #3b82f6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* --- two-panel layout --- */
+.layout {
+  display: flex;
+  height: 100vh;
+}
+
+.main-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.side-panel {
+  width: 340px;
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 1.25rem;
+  display: none;
+  flex-shrink: 0;
+}
+
+.side-panel.visible { display: block; }
+
+/* --- header --- */
+.header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.header h1 { font-size: 1.1rem; font-weight: 600; }
+
+.constraint-badge {
+  padding: 0.2rem 0.6rem;
+  background: rgba(99,102,241,0.15);
+  border: 1px solid rgba(99,102,241,0.3);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: var(--accent-hover);
+}
+
+.header-right {
+  margin-left: auto;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-sm {
+  padding: 0.3rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.btn-sm:hover { border-color: var(--accent); color: var(--text); }
+
+/* --- chat area --- */
+.chat-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+
+.welcome {
+  text-align: center;
+  margin-top: 20vh;
+  color: var(--muted);
+}
+
+.welcome h2 { font-size: 1.3rem; color: var(--text); margin-bottom: 0.5rem; }
+
+.message {
+  max-width: 740px;
+  margin: 0 auto 1.5rem;
+}
+
+.msg-user {
+  background: var(--accent);
+  color: white;
+  padding: 0.75rem 1rem;
+  border-radius: 12px 12px 4px 12px;
+  display: inline-block;
+  float: right;
+  max-width: 80%;
+  clear: both;
+  font-size: 0.95rem;
+}
+
+.msg-assistant {
+  clear: both;
+  padding: 1rem 0;
+}
+
+.msg-assistant .answer-content {
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.msg-assistant .answer-content h1,
+.msg-assistant .answer-content h2,
+.msg-assistant .answer-content h3 {
+  margin-top: 1rem;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+}
+
+.msg-assistant .answer-content h1 { font-size: 1.2rem; }
+.msg-assistant .answer-content h2 { font-size: 1.1rem; }
+.msg-assistant .answer-content h3 { font-size: 1rem; color: var(--accent-hover); }
+
+.msg-assistant .answer-content p { margin-bottom: 0.6rem; }
+
+.msg-assistant .answer-content ul,
+.msg-assistant .answer-content ol {
+  margin: 0.4rem 0 0.6rem 1.5rem;
+}
+
+.msg-assistant .answer-content strong { color: var(--accent-hover); }
+
+.msg-assistant .answer-content code {
+  background: var(--surface2);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+.msg-meta {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.msg-meta span { display: flex; align-items: center; gap: 0.25rem; }
+
+.loading-msg {
+  clear: both;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--amber);
+  font-size: 0.9rem;
+  padding: 0.5rem 0;
+}
+
+.dot-pulse { display: flex; gap: 4px; }
+.dot-pulse span {
+  width: 6px; height: 6px;
+  background: var(--amber);
+  border-radius: 50%;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.dot-pulse span:nth-child(2) { animation-delay: 0.2s; }
+.dot-pulse span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes pulse {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+/* --- input bar --- */
+.input-bar {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.input-wrap {
+  max-width: 740px;
+  margin: 0 auto;
+  display: flex;
+  gap: 0.75rem;
+}
+
+.input-wrap textarea {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 0.95rem;
+  font-family: inherit;
+  resize: none;
+  height: 48px;
+}
+
+.input-wrap textarea:focus { outline: none; border-color: var(--accent); }
+
+.input-wrap button {
+  padding: 0 1.25rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.input-wrap button:hover { background: var(--accent-hover); }
+.input-wrap button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* --- side panel sections --- */
+.sp-section {
+  margin-bottom: 1.25rem;
+}
+
+.sp-section h3 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 0.6rem;
+}
+
+/* budget cards */
+.budget-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.b-card {
+  padding: 0.6rem;
+  background: var(--bg);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.b-card .val { font-size: 1.3rem; font-weight: 600; color: var(--accent-hover); }
+.b-card .val.ok { color: var(--green); }
+.b-card .val.warn { color: var(--amber); }
+.b-card .lbl { font-size: 0.7rem; color: var(--muted); margin-top: 0.1rem; }
+
+/* token chart */
+.token-chart { display: flex; flex-direction: column; gap: 3px; }
+
+.tc-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+}
+
+.tc-label {
+  width: 90px;
+  text-align: right;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tc-bar-bg {
+  flex: 1;
+  height: 14px;
+  background: var(--bg);
+  border-radius: 3px;
+  position: relative;
+  overflow: hidden;
+}
+
+.tc-bar {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+
+.tc-bar.hot { background: var(--amber); }
+.tc-bar.over { background: var(--red); }
+
+.tc-val {
+  width: 36px;
+  text-align: right;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.tc-limit {
+  position: absolute;
+  right: 0;
+  top: 0;
+  height: 100%;
+  border-right: 2px dashed rgba(239,68,68,0.5);
+}
+
+/* sources & sub-queries */
+.source-item {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.source-item:last-child { border-bottom: none; }
+.source-item a { color: var(--accent-hover); text-decoration: none; }
+.source-item a:hover { text-decoration: underline; }
+
+.sq-tag {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  background: rgba(99,102,241,0.1);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 5px;
+  font-size: 0.8rem;
+  margin: 0.15rem 0;
+}
+
+.rag-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.rag-badge.retrieval {
+  background: rgba(34,197,94,0.15);
+  border: 1px solid rgba(34,197,94,0.3);
+  color: var(--green);
+}
+
+.rag-badge.search {
+  background: rgba(59,130,246,0.15);
+  border: 1px solid rgba(59,130,246,0.3);
+  color: var(--blue);
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <!-- Main panel -->
+  <div class="main-panel">
+    <div class="header">
+      <h1>Deep Research Agent</h1>
+      <span class="constraint-badge">Max 2,048 context tokens / call</span>
+      <div class="header-right">
+        <button class="btn-sm" onclick="newSession()">New Session</button>
+      </div>
+    </div>
+
+    <div class="chat-area" id="chat">
+      <div class="welcome" id="welcome">
+        <h2>Research anything</h2>
+        <p>Ask a complex question. The agent will decompose it, search the web,<br>
+        and synthesise an answer — all within memory constraints.</p>
+      </div>
+    </div>
+
+    <div class="input-bar">
+      <div class="input-wrap">
+        <textarea id="query" placeholder="Ask a research question..." rows="1"></textarea>
+        <button id="submit" onclick="send()">Research</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Side panel -->
+  <div class="side-panel" id="sidebar">
+    <div class="sp-section" id="sp-budget"></div>
+    <div class="sp-section" id="sp-chart"></div>
+    <div class="sp-section" id="sp-subqueries"></div>
+    <div class="sp-section" id="sp-sources"></div>
+  </div>
+</div>
+
+<script>
+let sessionId = null;
+let isProcessing = false;
+
+function send() {
+  const q = document.getElementById('query').value.trim();
+  if (!q || isProcessing) return;
+  if (sessionId) { sendFollowUp(q); } else { sendResearch(q); }
+}
+
+async function sendResearch(query) {
+  isProcessing = true;
+  document.getElementById('submit').disabled = true;
+  document.getElementById('submit').textContent = 'Researching...';
+  document.getElementById('welcome').style.display = 'none';
+  document.getElementById('query').value = '';
+
+  addUserMsg(query);
+  const loadingId = addLoading('Decomposing, searching & synthesising...');
+
+  try {
+    const resp = await fetch('/research', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const data = await resp.json();
+
+    sessionId = data.session_id;
+    removeLoading(loadingId);
+    addAssistantMsg(data.answer, {
+      elapsed: data.elapsed_seconds,
+      calls: data.budget.total_llm_calls,
+      tokens: data.budget.total_tokens,
+    });
+    renderSidebar(data);
+  } catch (e) {
+    removeLoading(loadingId);
+    addErrorMsg(e.message);
+  } finally {
+    isProcessing = false;
+    document.getElementById('submit').disabled = false;
+    document.getElementById('submit').textContent = sessionId ? 'Ask' : 'Research';
+  }
+}
+
+async function sendFollowUp(query) {
+  isProcessing = true;
+  document.getElementById('submit').disabled = true;
+  document.getElementById('query').value = '';
+
+  addUserMsg(query);
+  const loadingId = addLoading('Retrieving from memory...');
+
+  try {
+    const resp = await fetch('/followup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, session_id: sessionId }),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const data = await resp.json();
+
+    removeLoading(loadingId);
+    addAssistantMsg(data.answer, {
+      elapsed: data.elapsed_seconds,
+      calls: data.budget.total_llm_calls,
+      tokens: data.budget.total_tokens,
+      rag: data.used_retrieval,
+      ragChunks: data.retrieved_chunks,
+    });
+    renderFollowUpSidebar(data);
+  } catch (e) {
+    removeLoading(loadingId);
+    addErrorMsg(e.message);
+  } finally {
+    isProcessing = false;
+    document.getElementById('submit').disabled = false;
+  }
+}
+
+function newSession() {
+  sessionId = null;
+  document.getElementById('chat').innerHTML =
+    '<div class="welcome" id="welcome"><h2>Research anything</h2>' +
+    '<p>Ask a complex question. The agent will decompose it, search the web,<br>' +
+    'and synthesise an answer — all within memory constraints.</p></div>';
+  document.getElementById('sidebar').classList.remove('visible');
+  document.getElementById('submit').textContent = 'Research';
+  fetch('/memory/reset', { method: 'POST' });
+}
+
+// --- chat message helpers ---
+
+function addUserMsg(text) {
+  const chat = document.getElementById('chat');
+  const d = document.createElement('div');
+  d.className = 'message';
+  d.innerHTML = '<div class="msg-user">' + esc(text) + '</div>';
+  chat.appendChild(d);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function addAssistantMsg(md, meta) {
+  const chat = document.getElementById('chat');
+  const d = document.createElement('div');
+  d.className = 'message msg-assistant';
+
+  let badge = '';
+  if (meta.rag !== undefined) {
+    if (meta.rag) {
+      badge = '<span class="rag-badge retrieval">Retrieved from memory (' + meta.ragChunks + ' chunks)</span>';
+    } else {
+      badge = '<span class="rag-badge search">Web search (no prior context)</span>';
+    }
+  }
+
+  let metaHtml = '<div class="msg-meta">';
+  metaHtml += '<span>' + meta.elapsed + 's</span>';
+  metaHtml += '<span>' + meta.calls + ' LLM calls</span>';
+  metaHtml += '<span>' + meta.tokens.toLocaleString() + ' tokens</span>';
+  metaHtml += '</div>';
+
+  d.innerHTML = badge + '<div class="answer-content">' + renderMarkdown(md) + '</div>' + metaHtml;
+  chat.appendChild(d);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function addLoading(text) {
+  const id = 'load-' + Date.now();
+  const chat = document.getElementById('chat');
+  const d = document.createElement('div');
+  d.className = 'message loading-msg';
+  d.id = id;
+  d.innerHTML = '<div class="dot-pulse"><span></span><span></span><span></span></div> ' + esc(text);
+  chat.appendChild(d);
+  chat.scrollTop = chat.scrollHeight;
+  return id;
+}
+
+function removeLoading(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+function addErrorMsg(text) {
+  const chat = document.getElementById('chat');
+  const d = document.createElement('div');
+  d.className = 'message';
+  d.innerHTML = '<div style="color:var(--red);font-size:0.9rem;">Error: ' + esc(text) + '</div>';
+  chat.appendChild(d);
+}
+
+// --- markdown renderer ---
+
+function renderMarkdown(text) {
+  let html = esc(text);
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/`(.+?)`/g, '<code>$1</code>');
+  html = html.replace(/^\- (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>\n?)+/g, function(m) { return '<ul>' + m + '</ul>'; });
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  const paragraphs = html.split(/\n{2,}/);
+  html = paragraphs.map(p => {
+    p = p.trim();
+    if (!p) return '';
+    if (p.startsWith('<h') || p.startsWith('<ul') || p.startsWith('<ol')) return p;
+    return '<p>' + p.replace(/\n/g, '<br>') + '</p>';
+  }).join('\n');
+  return html;
+}
+
+// --- sidebar rendering ---
+
+function renderSidebar(data) {
+  const sb = document.getElementById('sidebar');
+  sb.classList.add('visible');
+
+  const b = data.budget;
+  const maxUsed = Math.max(...b.per_call_breakdown.map(c => c.prompt_tokens));
+  const ok = maxUsed <= b.max_context_tokens_per_call;
+
+  document.getElementById('sp-budget').innerHTML =
+    '<h3>Token Budget</h3>' +
+    '<div class="budget-row">' +
+      bcard(b.total_llm_calls, 'LLM Calls', '') +
+      bcard(b.total_tokens.toLocaleString(), 'Total Tokens', '') +
+    '</div>' +
+    '<div class="budget-row">' +
+      bcard(maxUsed + ' / ' + b.max_context_tokens_per_call, 'Max Prompt (per call)', ok ? 'ok' : 'warn') +
+      bcard(ok ? 'YES' : 'NO', 'Within Constraint', ok ? 'ok' : 'warn') +
+    '</div>' +
+    '<div class="budget-row">' +
+      bcard(data.elapsed_seconds + 's', 'Time Elapsed', '') +
+      bcard(data.memory_state.token_count + ' / ' + data.memory_state.max_tokens, 'Working Memory', '') +
+    '</div>';
+
+  renderTokenChart(b.per_call_breakdown, b.max_context_tokens_per_call);
+
+  const sqs = data.sub_queries.map(sq => '<div class="sq-tag">' + esc(sq) + '</div>').join('');
+  document.getElementById('sp-subqueries').innerHTML = '<h3>Sub-Queries</h3>' + sqs;
+
+  const seen = new Set();
+  const srcs = data.sources.filter(s => { if (seen.has(s.url)) return false; seen.add(s.url); return true; });
+  document.getElementById('sp-sources').innerHTML = '<h3>Sources</h3>' +
+    srcs.map(s => '<div class="source-item"><a href="'+esc(s.url)+'" target="_blank">'+esc(s.title||s.url)+'</a></div>').join('');
+}
+
+function renderFollowUpSidebar(data) {
+  const b = data.budget;
+  document.getElementById('sp-budget').innerHTML =
+    '<h3>Follow-up Budget</h3>' +
+    '<div class="budget-row">' +
+      bcard(b.total_llm_calls, 'LLM Calls', '') +
+      bcard(b.total_tokens.toLocaleString(), 'Total Tokens', '') +
+    '</div>' +
+    '<div class="budget-row">' +
+      bcard(data.retrieved_chunks, 'Chunks Retrieved', data.used_retrieval ? 'ok' : '') +
+      bcard(data.elapsed_seconds + 's', 'Time Elapsed', '') +
+    '</div>';
+
+  if (data.used_retrieval) {
+    renderTokenChart(b.per_call_breakdown, 2048);
+  }
+
+  if (data.sources.length > 0) {
+    const seen = new Set();
+    const srcs = data.sources.filter(s => { if (seen.has(s.url)) return false; seen.add(s.url); return true; });
+    document.getElementById('sp-sources').innerHTML = '<h3>Sources</h3>' +
+      srcs.map(s => '<div class="source-item"><a href="'+esc(s.url)+'" target="_blank">'+esc(s.title||s.url)+'</a></div>').join('');
+  }
+}
+
+function renderTokenChart(calls, maxTok) {
+  let rows = calls.map(c => {
+    const pct = Math.min((c.prompt_tokens / maxTok) * 100, 100);
+    const cls = pct > 90 ? 'hot' : (c.prompt_tokens > maxTok ? 'over' : '');
+    const label = c.step.replace(/^(summarise_|refine:)/, '').substring(0, 14);
+    return '<div class="tc-row">' +
+      '<span class="tc-label" title="' + esc(c.step) + '">' + esc(label) + '</span>' +
+      '<div class="tc-bar-bg"><div class="tc-bar ' + cls + '" style="width:' + pct + '%"></div></div>' +
+      '<span class="tc-val">' + c.prompt_tokens + '</span>' +
+    '</div>';
+  }).join('');
+
+  document.getElementById('sp-chart').innerHTML =
+    '<h3>Tokens Per Call <span style="font-size:0.65rem;color:var(--muted);text-transform:none;">(limit: ' + maxTok + ')</span></h3>' +
+    '<div class="token-chart">' + rows + '</div>';
+}
+
+function bcard(val, label, cls) {
+  return '<div class="b-card"><div class="val ' + cls + '">' + val + '</div><div class="lbl">' + label + '</div></div>';
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// --- keyboard shortcut ---
+document.getElementById('query').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+</script>
+</body>
+</html>
