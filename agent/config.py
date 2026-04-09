@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     # --- Model selection ------------------------------------------------------
     # Primary model — used for synthesis and complex reasoning.
     llm_model: str = "gpt-5-mini"
-
+    
+    llm_base_url: str = ""
+    
     # Set True when llm_model is an OpenAI reasoning model 
     llm_is_reasoning_model: bool = True
 
