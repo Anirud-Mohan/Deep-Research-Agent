@@ -311,6 +311,8 @@ body {
 
 .tc-bar.hot { background: var(--amber); }
 .tc-bar.over { background: var(--red); }
+.tc-bar.exempt { background: var(--border); }
+.tc-exempt { color: var(--border) !important; font-style: italic; }
 
 .tc-val {
   width: 36px;
@@ -348,26 +350,6 @@ body {
   margin: 0.15rem 0;
 }
 
-.rag-badge {
-  display: inline-block;
-  padding: 0.15rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-}
-
-.rag-badge.retrieval {
-  background: rgba(34,197,94,0.15);
-  border: 1px solid rgba(34,197,94,0.3);
-  color: var(--green);
-}
-
-.rag-badge.search {
-  background: rgba(59,130,246,0.15);
-  border: 1px solid rgba(59,130,246,0.3);
-  color: var(--blue);
-}
 </style>
 </head>
 <body>
@@ -403,12 +385,12 @@ body {
     <div class="sp-section" id="sp-budget"></div>
     <div class="sp-section" id="sp-chart"></div>
     <div class="sp-section" id="sp-subqueries"></div>
-    <div class="sp-section" id="sp-sources"></div>
   </div>
 </div>
 
 <script>
 let sessionId = null;
+let originalQuery = '';
 let isProcessing = false;
 
 function send() {
@@ -437,11 +419,13 @@ async function sendResearch(query) {
     const data = await resp.json();
 
     sessionId = data.session_id;
+    originalQuery = query;
     removeLoading(loadingId);
     addAssistantMsg(data.answer, {
       elapsed: data.elapsed_seconds,
       calls: data.budget.total_llm_calls,
       tokens: data.budget.total_tokens,
+      sources: data.sources,
     });
     renderSidebar(data);
   } catch (e) {
@@ -457,40 +441,53 @@ async function sendResearch(query) {
 async function sendFollowUp(query) {
   isProcessing = true;
   document.getElementById('submit').disabled = true;
+  document.getElementById('submit').textContent = 'Thinking...';
   document.getElementById('query').value = '';
 
   addUserMsg(query);
-  const loadingId = addLoading('Retrieving from memory...');
+  const loadingId = addLoading('Classifying query...');
 
   try {
     const resp = await fetch('/followup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, session_id: sessionId }),
+      body: JSON.stringify({ query, session_id: sessionId, original_query: originalQuery }),
     });
     if (!resp.ok) throw new Error(await resp.text());
     const data = await resp.json();
 
     removeLoading(loadingId);
+
+    if (data.is_new_research) {
+      sessionId = data.session_id;
+      originalQuery = query;
+    }
+
     addAssistantMsg(data.answer, {
       elapsed: data.elapsed_seconds,
       calls: data.budget.total_llm_calls,
       tokens: data.budget.total_tokens,
-      rag: data.used_retrieval,
-      ragChunks: data.retrieved_chunks,
+      sources: data.sources,
     });
-    renderFollowUpSidebar(data);
+
+    if (data.is_new_research) {
+      renderSidebar(data);
+    } else {
+      renderFollowUpSidebar(data);
+    }
   } catch (e) {
     removeLoading(loadingId);
     addErrorMsg(e.message);
   } finally {
     isProcessing = false;
     document.getElementById('submit').disabled = false;
+    document.getElementById('submit').textContent = 'Ask';
   }
 }
 
 function newSession() {
   sessionId = null;
+  originalQuery = '';
   document.getElementById('chat').innerHTML =
     '<div class="welcome" id="welcome"><h2>Research anything</h2>' +
     '<p>Ask a complex question. The agent will decompose it, search the web,<br>' +
@@ -516,13 +513,14 @@ function addAssistantMsg(md, meta) {
   const d = document.createElement('div');
   d.className = 'message msg-assistant';
 
-  let badge = '';
-  if (meta.rag !== undefined) {
-    if (meta.rag) {
-      badge = '<span class="rag-badge retrieval">Retrieved from memory (' + meta.ragChunks + ' chunks)</span>';
-    } else {
-      badge = '<span class="rag-badge search">Web search (no prior context)</span>';
-    }
+  let sourcesHtml = '';
+  if (meta.sources && meta.sources.length > 0) {
+    const seen = new Set();
+    const unique = meta.sources.filter(s => { if (seen.has(s.url)) return false; seen.add(s.url); return true; });
+    sourcesHtml = '<div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid var(--border);">' +
+      '<div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-bottom:0.35rem;">Sources</div>' +
+      unique.map(s => '<div class="source-item"><a href="'+esc(s.url)+'" target="_blank">'+esc(s.title||s.url)+'</a></div>').join('') +
+      '</div>';
   }
 
   let metaHtml = '<div class="msg-meta">';
@@ -531,7 +529,7 @@ function addAssistantMsg(md, meta) {
   metaHtml += '<span>' + meta.tokens.toLocaleString() + ' tokens</span>';
   metaHtml += '</div>';
 
-  d.innerHTML = badge + '<div class="answer-content">' + renderMarkdown(md) + '</div>' + metaHtml;
+  d.innerHTML = '<div class="answer-content">' + renderMarkdown(md) + '</div>' + sourcesHtml + metaHtml;
   chat.appendChild(d);
   chat.scrollTop = chat.scrollHeight;
 }
@@ -591,8 +589,9 @@ function renderSidebar(data) {
   sb.classList.add('visible');
 
   const b = data.budget;
-  const maxUsed = Math.max(...b.per_call_breakdown.map(c => c.prompt_tokens));
-  const ok = maxUsed <= b.max_context_tokens_per_call;
+  const budgetedCalls = b.per_call_breakdown.filter(c => c.budgeted !== false);
+  const maxCtx = budgetedCalls.length ? Math.max(...budgetedCalls.map(c => c.context_tokens || 0)) : 0;
+  const ok = maxCtx <= b.max_context_tokens_per_call;
 
   document.getElementById('sp-budget').innerHTML =
     '<h3>Token Budget</h3>' +
@@ -601,7 +600,7 @@ function renderSidebar(data) {
       bcard(b.total_tokens.toLocaleString(), 'Total Tokens', '') +
     '</div>' +
     '<div class="budget-row">' +
-      bcard(maxUsed + ' / ' + b.max_context_tokens_per_call, 'Max Prompt (per call)', ok ? 'ok' : 'warn') +
+      bcard(maxCtx + ' / ' + b.max_context_tokens_per_call, 'Max Context (per call)', ok ? 'ok' : 'warn') +
       bcard(ok ? 'YES' : 'NO', 'Within Constraint', ok ? 'ok' : 'warn') +
     '</div>' +
     '<div class="budget-row">' +
@@ -613,15 +612,16 @@ function renderSidebar(data) {
 
   const sqs = data.sub_queries.map(sq => '<div class="sq-tag">' + esc(sq) + '</div>').join('');
   document.getElementById('sp-subqueries').innerHTML = '<h3>Sub-Queries</h3>' + sqs;
-
-  const seen = new Set();
-  const srcs = data.sources.filter(s => { if (seen.has(s.url)) return false; seen.add(s.url); return true; });
-  document.getElementById('sp-sources').innerHTML = '<h3>Sources</h3>' +
-    srcs.map(s => '<div class="source-item"><a href="'+esc(s.url)+'" target="_blank">'+esc(s.title||s.url)+'</a></div>').join('');
 }
 
 function renderFollowUpSidebar(data) {
   const b = data.budget;
+  const budgetedCalls = b.per_call_breakdown.filter(c => c.budgeted !== false);
+  const maxCtx = budgetedCalls.length
+    ? Math.max(...budgetedCalls.map(c => c.context_tokens || 0))
+    : 0;
+  const ok = maxCtx <= b.max_context_tokens_per_call;
+
   document.getElementById('sp-budget').innerHTML =
     '<h3>Follow-up Budget</h3>' +
     '<div class="budget-row">' +
@@ -629,36 +629,41 @@ function renderFollowUpSidebar(data) {
       bcard(b.total_tokens.toLocaleString(), 'Total Tokens', '') +
     '</div>' +
     '<div class="budget-row">' +
+      bcard(maxCtx + ' / ' + b.max_context_tokens_per_call, 'Max Context (per call)', ok ? 'ok' : 'warn') +
+      bcard(ok ? 'YES' : 'NO', 'Within Constraint', ok ? 'ok' : 'warn') +
+    '</div>' +
+    '<div class="budget-row">' +
       bcard(data.retrieved_chunks, 'Chunks Retrieved', data.used_retrieval ? 'ok' : '') +
       bcard(data.elapsed_seconds + 's', 'Time Elapsed', '') +
     '</div>';
 
-  if (data.used_retrieval) {
-    renderTokenChart(b.per_call_breakdown, 2048);
+  if (b.per_call_breakdown && b.per_call_breakdown.length > 0) {
+    renderTokenChart(b.per_call_breakdown, b.max_context_tokens_per_call);
   }
 
-  if (data.sources.length > 0) {
-    const seen = new Set();
-    const srcs = data.sources.filter(s => { if (seen.has(s.url)) return false; seen.add(s.url); return true; });
-    document.getElementById('sp-sources').innerHTML = '<h3>Sources</h3>' +
-      srcs.map(s => '<div class="source-item"><a href="'+esc(s.url)+'" target="_blank">'+esc(s.title||s.url)+'</a></div>').join('');
-  }
+  document.getElementById('sp-subqueries').innerHTML = '';
 }
 
 function renderTokenChart(calls, maxTok) {
   let rows = calls.map(c => {
-    const pct = Math.min((c.prompt_tokens / maxTok) * 100, 100);
-    const cls = pct > 90 ? 'hot' : (c.prompt_tokens > maxTok ? 'over' : '');
+    const ctx = c.context_tokens || 0;
+    const exempt = c.budgeted === false;
+    const pct = exempt ? Math.min((ctx / maxTok) * 100, 100) : Math.min((ctx / maxTok) * 100, 100);
+    const cls = exempt ? 'exempt' : (ctx > maxTok ? 'over' : (pct > 90 ? 'hot' : ''));
     const label = c.step.replace(/^(summarise_|refine:)/, '').substring(0, 14);
+    const tip = esc(c.step) + (exempt ? ' [exempt from budget]' : '') + ' — context: ' + ctx + ', full prompt: ' + c.prompt_tokens;
     return '<div class="tc-row">' +
-      '<span class="tc-label" title="' + esc(c.step) + '">' + esc(label) + '</span>' +
-      '<div class="tc-bar-bg"><div class="tc-bar ' + cls + '" style="width:' + pct + '%"></div></div>' +
-      '<span class="tc-val">' + c.prompt_tokens + '</span>' +
+      '<span class="tc-label" title="' + tip + '">' + esc(label) + '</span>' +
+      '<div class="tc-bar-bg">' +
+        '<div class="tc-bar ' + cls + '" style="width:' + pct + '%"></div>' +
+        (exempt ? '' : '<div class="tc-limit"></div>') +
+      '</div>' +
+      '<span class="tc-val' + (exempt ? ' tc-exempt' : '') + '" title="' + tip + '">' + ctx + '</span>' +
     '</div>';
   }).join('');
 
   document.getElementById('sp-chart').innerHTML =
-    '<h3>Tokens Per Call <span style="font-size:0.65rem;color:var(--muted);text-transform:none;">(limit: ' + maxTok + ')</span></h3>' +
+    '<h3>Context Tokens / Call <span style="font-size:0.65rem;color:var(--muted);text-transform:none;">(limit: ' + maxTok + ')</span></h3>' +
     '<div class="token-chart">' + rows + '</div>';
 }
 

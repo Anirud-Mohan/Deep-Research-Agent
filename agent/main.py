@@ -63,6 +63,7 @@ class SynthesiseRequest(BaseModel):
 class FollowUpRequest(BaseModel):
     query: str
     session_id: str
+    original_query: str = ""
 
 
 class ResearchResponse(BaseModel):
@@ -77,11 +78,15 @@ class ResearchResponse(BaseModel):
 
 class FollowUpResponse(BaseModel):
     answer: str
+    is_new_research: bool
     used_retrieval: bool
     retrieved_chunks: int
     sources: list[dict[str, str]]
+    sub_queries: list[str]
+    memory_state: dict
     budget: dict
     elapsed_seconds: float
+    session_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +126,7 @@ async def api_synthesise(req: SynthesiseRequest):
 async def api_memory_state():
     """Introspect the vector store."""
     chunks = retrieve_chunks("research", top_k=10)
-    return {"stored_chunks": len(chunks), "sample_chunks": chunks[:3]}
+    return {"stored_chunks": len(chunks), "sample_chunks": [c["text"][:200] for c in chunks[:3]]}
 
 
 @app.post("/memory/reset")
@@ -217,41 +222,140 @@ async def api_research(req: ResearchRequest):
 # Follow-up endpoint — uses RAG retrieval from vector store
 # ---------------------------------------------------------------------------
 
+_CLASSIFY_SYSTEM = (
+    "You decide whether a user's new message is a follow-up to a previous "
+    "research topic or a completely new question.\n\n"
+    "Return ONLY the word: FOLLOWUP or NEW"
+)
+
 _FOLLOWUP_SYSTEM = (
     "You are a research assistant. Answer the user's follow-up question "
-    "using ONLY the retrieved context below. Be concise and factual. "
-    "If the context does not contain enough information to answer, "
-    "say so clearly."
+    "using ONLY the retrieved context below. Be detailed and factual.\n\n"
+    "If the context does NOT contain enough information to answer the "
+    "question, respond with EXACTLY the text: INSUFFICIENT_CONTEXT\n"
+    "Do not add anything else in that case."
 )
+
+
+async def _classify_query(
+    new_query: str, original_query: str, tracker: BudgetTracker
+) -> bool:
+    """Return True if *new_query* is a follow-up to *original_query*."""
+    user_msg = (
+        f"Previous research topic: {original_query}\n"
+        f"New message: {new_query}"
+    )
+    result = await call_llm(
+        system=_CLASSIFY_SYSTEM,
+        user=user_msg,
+        tracker=tracker,
+        step="classify",
+        max_output_tokens=10,
+        model=settings.summary_llm_model,
+    )
+    return "FOLLOWUP" in result.upper()
 
 
 @app.post("/followup", response_model=FollowUpResponse)
 async def api_followup(req: FollowUpRequest):
-    """Answer a follow-up using RAG retrieval from the vector store.
+    """Smart routing: classifies the query as a follow-up or new research.
 
-    First attempts to answer from stored research chunks. If the vector
-    store has insufficient context, falls back to a targeted web search.
+    Follow-ups use RAG retrieval from the vector store.
+    New queries trigger the full research pipeline.
     """
     t0 = time.perf_counter()
     tracker = BudgetTracker()
 
-    log.info("=== FOLLOW-UP for session %s ===", req.session_id)
-    log.info("Follow-up query: %s", req.query)
+    log.info("=== INCOMING QUERY for session %s ===", req.session_id)
+    log.info("Query: %s", req.query)
 
-    chunks = retrieve_chunks(req.query, top_k=5)
-    all_sources: list[dict[str, str]] = []
-    used_retrieval = len(chunks) > 0
+    is_followup = False
+    if req.original_query:
+        is_followup = await _classify_query(req.query, req.original_query, tracker)
+        log.info("Classification: %s", "FOLLOWUP" if is_followup else "NEW RESEARCH")
 
-    if chunks:
-        log.info("Retrieved %d chunks from vector store", len(chunks))
-        context = "\n\n".join(
-            f"[Chunk {i+1}]\n{c}" for i, c in enumerate(chunks)
+    # --- New research path ---
+    if not is_followup:
+        log.info("Routing to full research pipeline")
+        reset_vector_store()
+        session_id = uuid.uuid4().hex[:12]
+        memory = WorkingMemory()
+
+        sub_queries = await decompose(req.query, tracker)
+        sub_queries = sub_queries[:3]
+        log.info("Decomposed into %d sub-queries: %s", len(sub_queries), sub_queries)
+
+        findings: list[dict[str, str]] = []
+        all_sources: list[dict[str, str]] = []
+
+        for i, sq in enumerate(sub_queries, 1):
+            log.info("--- Researching sub-query %d/%d ---", i, len(sub_queries))
+            result = await research_subquery(sq, tracker)
+            memory.add_finding(sq, result.summary)
+            findings.append({"subquery": sq, "summary": result.summary})
+            all_sources.extend(result.sources)
+
+        answer = await synthesise(req.query, findings, tracker)
+        elapsed = time.perf_counter() - t0
+
+        save_session(
+            session_id=session_id,
+            query=req.query,
+            sub_queries=sub_queries,
+            findings=findings,
+            sources=all_sources,
+            answer=answer,
+            memory_state=memory.state_snapshot(),
+            budget=tracker.summary(),
         )
-        context = truncate_to_tokens(context, tracker.max_context_tokens)
 
-        user_msg = f"Question: {req.query}\n\nRetrieved context:\n{context}"
-        if count_tokens(user_msg) > tracker.max_context_tokens:
-            user_msg = truncate_to_tokens(user_msg, tracker.max_context_tokens)
+        log.info("=== NEW RESEARCH COMPLETE in %.1fs ===", elapsed)
+
+        return FollowUpResponse(
+            answer=answer,
+            is_new_research=True,
+            used_retrieval=False,
+            retrieved_chunks=0,
+            sources=all_sources,
+            sub_queries=sub_queries,
+            memory_state=memory.state_snapshot(),
+            budget=tracker.summary(),
+            elapsed_seconds=round(elapsed, 1),
+            session_id=session_id,
+        )
+
+    # --- Follow-up path (RAG retrieval with research fallback) ---
+    log.info("Routing to RAG retrieval")
+    chunk_results = retrieve_chunks(req.query, top_k=5)
+    all_sources: list[dict[str, str]] = []
+    used_retrieval = False
+    answer = ""
+
+    if chunk_results:
+        log.info("Retrieved %d chunks from vector store", len(chunk_results))
+
+        # Extract unique sources from chunk metadata
+        seen_urls: set[str] = set()
+        for cr in chunk_results:
+            url = cr["metadata"].get("url", "")
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                all_sources.append({
+                    "title": cr["metadata"].get("title", ""),
+                    "url": url,
+                })
+
+        # Build context with proper budget: reserve tokens for the question prefix
+        question_prefix = f"Question: {req.query}\n\nRetrieved context:\n"
+        prefix_tokens = count_tokens(question_prefix)
+        context_budget = tracker.max_context_tokens - prefix_tokens
+
+        context = "\n\n".join(
+            f"[Chunk {i+1}]\n{cr['text']}" for i, cr in enumerate(chunk_results)
+        )
+        context = truncate_to_tokens(context, max(context_budget, 100))
+
+        user_msg = question_prefix + context
 
         answer = await call_llm(
             system=_FOLLOWUP_SYSTEM,
@@ -259,8 +363,16 @@ async def api_followup(req: FollowUpRequest):
             tracker=tracker,
             step="followup_rag",
         )
-    else:
-        log.info("No chunks in vector store, falling back to web search")
+
+        if "INSUFFICIENT_CONTEXT" not in answer.upper():
+            used_retrieval = True
+        else:
+            log.info("RAG context insufficient, falling back to web search")
+            answer = ""
+            all_sources = []
+
+    if not used_retrieval:
+        log.info("Performing targeted web search for follow-up")
         result = await research_subquery(req.query, tracker)
         all_sources = result.sources
         answer = result.summary
@@ -270,11 +382,15 @@ async def api_followup(req: FollowUpRequest):
 
     return FollowUpResponse(
         answer=answer,
+        is_new_research=False,
         used_retrieval=used_retrieval,
-        retrieved_chunks=len(chunks),
+        retrieved_chunks=len(chunk_results),
         sources=all_sources,
+        sub_queries=[],
+        memory_state={},
         budget=tracker.summary(),
         elapsed_seconds=round(elapsed, 1),
+        session_id=req.session_id,
     )
 
 

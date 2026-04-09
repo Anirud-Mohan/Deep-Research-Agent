@@ -33,6 +33,26 @@ def _get_collection() -> chromadb.Collection:
     )
 
 
+def chunk_text(text: str, chunk_tokens: int = 400, overlap_tokens: int = 50) -> list[str]:
+    """Split *text* into overlapping chunks of roughly *chunk_tokens* tokens."""
+    words = text.split()
+    if not words:
+        return []
+    avg_chars_per_token = 4
+    chunk_words = max(1, (chunk_tokens * avg_chars_per_token) // 5)
+    overlap_words = max(0, (overlap_tokens * avg_chars_per_token) // 5)
+    step = max(1, chunk_words - overlap_words)
+
+    chunks = []
+    for start in range(0, len(words), step):
+        segment = " ".join(words[start : start + chunk_words])
+        if segment.strip():
+            chunks.append(segment)
+        if start + chunk_words >= len(words):
+            break
+    return chunks
+
+
 def store_chunks(texts: list[str], metadatas: list[dict] | None = None) -> None:
     """Embed and persist *texts* in the vector store."""
     col = _get_collection()
@@ -43,13 +63,20 @@ def store_chunks(texts: list[str], metadatas: list[dict] | None = None) -> None:
     col.add(**kwargs)
 
 
-def retrieve_chunks(query: str, top_k: int = settings.vector_top_k) -> list[str]:
-    """Return the *top_k* most relevant stored chunks for *query*."""
+def retrieve_chunks(
+    query: str, top_k: int = settings.vector_top_k
+) -> list[dict]:
+    """Return the *top_k* most relevant stored chunks for *query*.
+
+    Each item is ``{"text": ..., "metadata": {...}}``.
+    """
     col = _get_collection()
     if col.count() == 0:
         return []
     results = col.query(query_texts=[query], n_results=min(top_k, col.count()))
-    return results["documents"][0] if results["documents"] else []
+    docs = results["documents"][0] if results["documents"] else []
+    metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
+    return [{"text": d, "metadata": m} for d, m in zip(docs, metas)]
 
 
 def reset_vector_store() -> None:
@@ -93,6 +120,7 @@ async def summarise_source(
         user=text,
         tracker=tracker,
         step="summarise_source",
+        model=settings.summary_llm_model,
     )
 
 
@@ -115,6 +143,7 @@ async def summarise_subquery(
         user=combined,
         tracker=tracker,
         step="summarise_subquery",
+        model=settings.summary_llm_model,
     )
 
 
@@ -123,12 +152,20 @@ async def compress_draft(
     target_tokens: int,
     tracker: BudgetTracker,
 ) -> str:
-    """Compress the running draft answer when it grows too large."""
+    """Compress the running draft answer when it grows too large.
+
+    Budget enforcement is deliberately disabled here: the draft is an
+    agent-generated intermediate artifact, not web-fetched research context,
+    so the 2048-token constraint does not apply to it. Only the *output*
+    is constrained (to *target_tokens*).
+    """
     return await call_llm(
         system=_COMPRESS_DRAFT_PROMPT.format(target=target_tokens),
         user=draft,
         tracker=tracker,
         step="compress_draft",
+        model=settings.summary_llm_model,
+        enforce_budget=False,
     )
 
 

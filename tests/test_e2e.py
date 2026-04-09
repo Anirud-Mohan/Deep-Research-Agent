@@ -124,12 +124,18 @@ async def test_followup_with_rag():
 
         res2 = await client.post(
             "/followup",
-            json={"query": "What about fusion fuel sources?", "session_id": "test"},
+            json={
+                "query": "What about fusion fuel sources?",
+                "session_id": "test",
+                "original_query": "Benefits of nuclear fusion energy",
+            },
             timeout=60,
         )
         assert res2.status_code == 200
         data = res2.json()
         assert data["answer"]
+        assert data["is_new_research"] is False
         assert data["used_retrieval"] is True
         assert data["retrieved_chunks"] >= 1
         assert data["elapsed_seconds"] > 0
+        assert data["session_id"] == "test"

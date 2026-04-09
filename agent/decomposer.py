@@ -6,6 +6,7 @@ import json
 import re
 
 from agent.budget import BudgetTracker
+from agent.config import settings
 from agent.llm import call_llm
 
 _SYSTEM = (
@@ -25,6 +26,7 @@ async def decompose(query: str, tracker: BudgetTracker) -> list[str]:
         tracker=tracker,
         step="decompose",
         temperature=0.2,
+        model=settings.summary_llm_model,
     )
 
     try:

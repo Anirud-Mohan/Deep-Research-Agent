@@ -9,32 +9,32 @@ User Query
     │
     ▼
 ┌─────────────────┐
-│ Query Decomposer │  →  2-5 focused sub-questions
+│ Query Decomposer│  →  2-5 focused sub-questions
 └────────┬────────┘
          │
          ▼  (for each sub-query)
 ┌─────────────────┐     ┌────────────┐
-│   Researcher     │◄───►│ Tavily API │
-│  search + chunk  │     └────────────┘
+│   Researcher    │◄───►│ Tavily API │
+│  search + chunk │     └────────────┘
 └────────┬────────┘
          │  raw results + source URLs
          ▼
 ┌─────────────────┐
-│  Memory Manager  │
-│ ┌─────────────┐  │  Vector Store   — long-term chunk storage (ChromaDB)
-│ ├─────────────┤  │  Summarisation  — 3-level compression cascade
-│ ├─────────────┤  │  Working Memory — FIFO buffer, ≤2048 tokens
-│ └─────────────┘  │
+│  Memory Manager │
+│ ┌─────────────┐ │  Vector Store   — long-term chunk storage (ChromaDB)
+│ ├─────────────┤ │  Summarisation  — 3-level compression cascade
+│ ├─────────────┤ │  Working Memory — FIFO buffer, ≤2048 tokens
+│ └─────────────┘ │
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│   Synthesiser    │  Iterative refinement: builds the answer one sub-query at a time
+│   Synthesiser   │  Iterative refinement: builds the answer one sub-query at a time
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│  Follow-Up (RAG) │  Retrieves from vector store for conversational follow-ups
+│  Follow-Up (RAG)│  Retrieves from vector store for conversational follow-ups
 └─────────────────┘
 ```
 

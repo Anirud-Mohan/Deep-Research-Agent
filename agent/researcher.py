@@ -11,7 +11,7 @@ from tavily import AsyncTavilyClient
 
 from agent.budget import BudgetTracker
 from agent.config import settings
-from agent.memory import store_chunks, summarise_source, summarise_subquery
+from agent.memory import chunk_text, store_chunks, summarise_source, summarise_subquery
 
 log = logging.getLogger("agent")
 
@@ -38,35 +38,54 @@ async def research_subquery(
     response = await client.search(
         query=subquery,
         max_results=settings.max_search_results,
-        include_raw_content=False,
+        include_raw_content=True,
+        search_depth="advanced",
+        days=settings.search_recency_days,
     )
 
     log.info("Search returned %d results in %.1fs", len(response.get("results", [])), time.perf_counter() - t0)
 
-    raw_texts: list[str] = []
+    snippets: list[str] = []
     sources: list[dict[str, str]] = []
-    for result in response.get("results", []):
-        text = result.get("content", "")
-        if text:
-            raw_texts.append(text)
-            sources.append({
-                "title": result.get("title", ""),
-                "url": result.get("url", ""),
+    all_chunks: list[str] = []
+    all_chunk_metas: list[dict] = []
+
+    for i, result in enumerate(response.get("results", [])):
+        snippet = result.get("content", "")
+        raw_content = result.get("raw_content") or snippet
+        if not snippet:
+            continue
+
+        snippets.append(snippet)
+        sources.append({
+            "title": result.get("title", ""),
+            "url": result.get("url", ""),
+        })
+
+        title = result.get("title", "")
+        url = result.get("url", "")
+        chunks = chunk_text(raw_content)
+        for chunk in chunks:
+            all_chunks.append(chunk)
+            all_chunk_metas.append({
+                "subquery": subquery,
+                "source_idx": i,
+                "title": title,
+                "url": url,
             })
 
-    if not raw_texts:
+    if not snippets:
         return SubQueryResult(
             sub_query=subquery,
             summary=f"No results found for: {subquery}",
         )
 
-    store_chunks(
-        texts=raw_texts,
-        metadatas=[{"subquery": subquery, "source_idx": i} for i in range(len(raw_texts))],
-    )
+    if all_chunks:
+        store_chunks(texts=all_chunks, metadatas=all_chunk_metas)
+        log.info("Stored %d chunks from %d sources in vector store", len(all_chunks), len(snippets))
 
     source_summaries = await asyncio.gather(
-        *[summarise_source(raw, tracker) for raw in raw_texts]
+        *[summarise_source(raw, tracker) for raw in snippets]
     )
 
     subquery_summary = await summarise_subquery(

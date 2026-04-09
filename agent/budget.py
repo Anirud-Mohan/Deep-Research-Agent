@@ -42,13 +42,32 @@ class BudgetTracker:
 
     # -- recording -------------------------------------------------------------
 
-    def record(self, *, prompt_tokens: int, completion_tokens: int, step: str):
-        """Record one LLM invocation."""
+    def record(
+        self,
+        *,
+        prompt_tokens: int,
+        completion_tokens: int,
+        step: str,
+        context_tokens: int = 0,
+        budgeted: bool = True,
+    ):
+        """Record one LLM invocation.
+
+        *context_tokens* is the user-message-only token count (research
+        context), which is what the 2 048-token constraint actually governs.
+        *prompt_tokens* is the full API prompt (system + user) reported back
+        by the model provider.
+        *budgeted* is False for internal pipeline calls (e.g. compress_draft)
+        that are exempt from the research-context constraint — their input is
+        agent-generated, not web-fetched.
+        """
         self.calls.append(
             {
                 "step": step,
+                "context_tokens": context_tokens,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
+                "budgeted": budgeted,
             }
         )
 

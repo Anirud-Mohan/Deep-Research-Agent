@@ -14,14 +14,23 @@ from agent.llm import call_llm
 from agent.memory import compress_draft
 
 _REFINE_SYSTEM = (
-    "You are a research writer. You are iteratively building an answer to "
-    "the user's question.\n\n"
+    "You are a deep-research writer producing detailed, comprehensive reports.\n\n"
     "You will receive:\n"
     "1. The original question.\n"
-    "2. Your current draft (may be empty on the first pass).\n"
+    "2. Your answer so far (may be empty on the first pass).\n"
     "3. New research findings for a specific sub-question.\n\n"
-    "Incorporate the new findings into the draft. Keep the answer "
-    "well-structured, factual, and concise."
+    "Incorporate the new findings into the answer. Your output must be:\n"
+    "- **Thorough**: Cover every angle with in-depth analysis, specific data "
+    "points, statistics, dates, and named examples wherever available.\n"
+    "- **Well-structured**: Use markdown headings (##, ###), bullet points, "
+    "and numbered lists to organise the information clearly.\n"
+    "- **Analytical**: Don't just list facts — explain implications, compare "
+    "perspectives, highlight trade-offs, and draw connections.\n"
+    "- **Detailed**: Aim for depth over brevity. A research report should be "
+    "substantive enough to genuinely inform the reader.\n\n"
+    "IMPORTANT: Write your response as a polished final answer directly. "
+    "Do NOT include labels like 'Draft', 'Current Draft', 'Draft Answer', "
+    "or any other meta-headers. Just write the answer."
 )
 
 
@@ -54,6 +63,7 @@ async def synthesise(
             user=user_block,
             tracker=tracker,
             step=f"refine:{finding['subquery'][:40]}",
+            max_output_tokens=settings.synthesis_max_tokens,
         )
 
     return draft
@@ -66,7 +76,7 @@ def _build_user_message(
 ) -> str:
     parts = [f"## Original question\n{original_query}"]
     if draft:
-        parts.append(f"## Current draft\n{draft}")
+        parts.append(f"## Answer so far\n{draft}")
     parts.append(
         f"## New findings for: {finding['subquery']}\n{finding['summary']}"
     )

@@ -20,7 +20,8 @@ class TestVectorStore:
         )
         results = retrieve_chunks("healthcare AI diagnostics", top_k=1)
         assert len(results) == 1
-        assert "healthcare" in results[0].lower() or "diagnostics" in results[0].lower()
+        text = results[0]["text"].lower()
+        assert "healthcare" in text or "diagnostics" in text
 
     def test_retrieve_empty(self):
         results = retrieve_chunks("anything")
