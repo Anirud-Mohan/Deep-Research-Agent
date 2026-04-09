@@ -25,7 +25,7 @@ async def decompose(query: str, tracker: BudgetTracker) -> list[str]:
         user=query,
         tracker=tracker,
         step="decompose",
-        temperature=0.2,
+        temperature=0.1,
         model=settings.summary_llm_model,
     )
 

@@ -96,10 +96,10 @@ class FollowUpResponse(BaseModel):
 
 @app.post("/decompose", response_model=DecomposeResponse)
 async def api_decompose(req: ResearchRequest):
-    """Break a complex query into sub-queries."""
+    """Break a complex query into sub-queries (capped at 3)."""
     tracker = BudgetTracker()
     subs = await decompose(req.query, tracker)
-    return DecomposeResponse(sub_queries=subs)
+    return DecomposeResponse(sub_queries=subs[:3])
 
 
 @app.post("/search", response_model=SubQueryResponse)
